@@ -1,8 +1,9 @@
 import logging
 import os
 import sys
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 # Enable logging
 logging.basicConfig(
@@ -12,8 +13,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Get bot token from environment variable
-# We use .get() without raising an immediate error to allow the process 
-# to stay alive long enough for logs to show on Render.
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
 # The bot to promote
@@ -68,25 +67,50 @@ async def handle_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(redirect_message, reply_markup=reply_markup, parse_mode='Markdown')
 
-def main():
-    """Start the bot"""
+async def run_bot():
+    """Start the bot asynchronously"""
     if not BOT_TOKEN:
         logger.critical("FATAL: BOT_TOKEN is missing! Update it in Render Dashboard -> Environment.")
-        sys.exit(1)
+        return
 
     try:
         logger.info(f"Starting Redirect Bot for {POLYSSIGHTS_BOT}...")
         application = Application.builder().token(BOT_TOKEN).build()
         
+        # Add handlers
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_any_message))
         
+        # Initialize and start polling
+        # We use run_polling within the managed loop
         logger.info("Bot is now polling...")
-        application.run_polling(drop_pending_updates=True)
+        
+        # Using a more robust entry point for PTB v20+
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(drop_pending_updates=True)
+        
+        # Keep the bot running
+        # This is the async equivalent of idle()
+        stop_event = asyncio.Event()
+        await stop_event.wait()
         
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
+    finally:
+        if 'application' in locals():
+            await application.stop()
+            await application.shutdown()
+
+def main():
+    """Main entry point to handle the event loop"""
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user.")
+    except Exception as e:
+        logger.error(f"Main loop error: {e}")
 
 if __name__ == '__main__':
     main()
