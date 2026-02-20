@@ -3,7 +3,7 @@ import os
 import sys
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
 
 # Enable logging
 logging.basicConfig(
@@ -15,84 +15,120 @@ logger = logging.getLogger(__name__)
 # Get bot token from environment variable
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
-# The bot to promote
-POLYSSIGHTS_BOT = "@polyssightsbot"
+# Quiz Data
+QUIZ_QUESTIONS = [
+    {
+        "question": "1. What is the consensus mechanism used by Bitcoin?",
+        "options": ["Proof of Stake", "Proof of Work", "Proof of History", "Proof of Burn"],
+        "correct": 1
+    },
+    {
+        "question": "2. What is a 'Seed Phrase'?",
+        "options": ["A password for an exchange", "A list of words to recover a wallet", "The title of a crypto coin", "A transaction ID"],
+        "correct": 1
+    },
+    {
+        "question": "3. What does 'HODL' stand for in the crypto community?",
+        "options": ["Hold On for Dear Life", "High Operations Digital Ledger", "Help Others Discover Liberty", "Highly Optimized Decentralized Layer"],
+        "correct": 0
+    },
+    {
+        "question": "4. Which of these is a 'Stablecoin'?",
+        "options": ["Ethereum", "Dogecoin", "USDT", "Solana"],
+        "correct": 2
+    },
+    {
+        "question": "5. What is a 'Smart Contract'?",
+        "options": ["A physical legal document", "Self-executing code on a blockchain", "A trading bot", "A digital signature"],
+        "correct": 1
+    }
+]
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle the /start command - ONLY show the link"""
-    try:
-        user = update.effective_user
-        logger.info(f"User {user.id} started the bot")
+    """Start the quiz and reset user progress"""
+    user = update.effective_user
+    logger.info(f"User {user.id} started the quiz")
+    
+    context.user_data['score'] = 0
+    context.user_data['question_index'] = 0
+    
+    welcome_text = (
+        "👋 **Welcome to the Crypto Knowledge Test!**\n\n"
+        "I will ask you 5 questions to determine if you are a newbie or an expert.\n\n"
+        "Ready to start?"
+    )
+    
+    keyboard = [[InlineKeyboardButton("🚀 Start Quiz", callback_data="quiz_0")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def handle_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle quiz progression and answer checking"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    
+    # Check if this is an answer to a previous question
+    if data.startswith("ans_"):
+        parts = data.split("_")
+        q_idx = int(parts[1])
+        choice = int(parts[2])
         
-        welcome_message = f"""
-🌟 **MAIN BOT** 🌟
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-🔥 **Click below to visit our main bot:**
-
-👉 **{POLYSSIGHTS_BOT}** 👈
-
-━━━━━━━━━━━━━━━━━━━━━━━━
-
-*This bot only redirects to our main analytics bot.*
-        """
+        # Increment score if correct
+        if choice == QUIZ_QUESTIONS[q_idx]["correct"]:
+            context.user_data['score'] = context.user_data.get('score', 0) + 1
         
-        keyboard = [
-            [InlineKeyboardButton("🔥 CLICK HERE FOR MAIN BOT 🔥", url=f"https://t.me/{POLYSSIGHTS_BOT.replace('@', '')}")],
-        ]
+        next_q = q_idx + 1
+    else:
+        # Starting from the beginning
+        next_q = 0
+
+    # End of quiz logic
+    if next_q >= len(QUIZ_QUESTIONS):
+        score = context.user_data.get('score', 0)
+        level = "Expert 🧠" if score >= 4 else "Newbie 🌱"
         
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            welcome_message,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
+        final_text = (
+            f"✅ **Test Completed!**\n\n"
+            f"Your Score: {score}/5\n"
+            f"Assessed Level: **{level}**\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🙌 **Kudos for getting to test 5!**\n"
+            "📅 **New class begins next week.**\n"
+            "👋 Come back soon!\n"
+            "━━━━━━━━━━━━━━━━━━━━"
         )
-        
-    except Exception as e:
-        logger.error(f"Error in start_command: {e}")
+        await query.edit_message_text(final_text, parse_mode='Markdown')
+        return
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show help message"""
-    help_message = f"ℹ️ **HELP**\n\nRedirecting to: {POLYSSIGHTS_BOT}"
-    keyboard = [[InlineKeyboardButton("🔥 GO TO MAIN BOT 🔥", url=f"https://t.me/{POLYSSIGHTS_BOT.replace('@', '')}")]]
+    # Show next question
+    q_data = QUIZ_QUESTIONS[next_q]
+    keyboard = []
+    for i, option in enumerate(q_data["options"]):
+        keyboard.append([InlineKeyboardButton(option, callback_data=f"ans_{next_q}_{i}")])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(help_message, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def handle_any_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Always redirect to main bot"""
-    redirect_message = f"💡 **Looking for our main bot?**\n\n👉 **{POLYSSIGHTS_BOT}** 👈"
-    keyboard = [[InlineKeyboardButton("🔥 GO TO MAIN BOT 🔥", url=f"https://t.me/{POLYSSIGHTS_BOT.replace('@', '')}")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(redirect_message, reply_markup=reply_markup, parse_mode='Markdown')
+    await query.edit_message_text(f"📝 **Question {next_q + 1}:**\n\n{q_data['question']}", reply_markup=reply_markup, parse_mode='Markdown')
 
 async def run_bot():
     """Start the bot asynchronously"""
     if not BOT_TOKEN:
-        logger.critical("FATAL: BOT_TOKEN is missing! Update it in Render Dashboard -> Environment.")
+        logger.critical("FATAL: BOT_TOKEN is missing!")
         return
 
     try:
-        logger.info(f"Starting Redirect Bot for {POLYSSIGHTS_BOT}...")
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # Add handlers
         application.add_handler(CommandHandler("start", start_command))
-        application.add_handler(CommandHandler("help", help_command))
-        application.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle_any_message))
+        application.add_handler(CallbackQueryHandler(handle_quiz, pattern="^(quiz_|ans_)"))
         
-        # Initialize and start polling
-        # We use run_polling within the managed loop
         logger.info("Bot is now polling...")
-        
-        # Using a more robust entry point for PTB v20+
         await application.initialize()
         await application.start()
         await application.updater.start_polling(drop_pending_updates=True)
         
-        # Keep the bot running
-        # This is the async equivalent of idle()
         stop_event = asyncio.Event()
         await stop_event.wait()
         
@@ -104,7 +140,7 @@ async def run_bot():
             await application.shutdown()
 
 def main():
-    """Main entry point to handle the event loop"""
+    """Main entry point"""
     try:
         asyncio.run(run_bot())
     except KeyboardInterrupt:
